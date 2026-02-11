@@ -21,65 +21,102 @@ const ReadingView: React.FC<ReadingViewProps> = ({
 
   // Helper to match text word against dictionary word
   const findMatchingWord = (token: string) => {
-    const normalized = token.toLowerCase().replace(/[.,!?—\s]/g, '');
+    // Normalize input token: lowercase, trim punctuation but keep internal spaces
+    const normalized = token.toLowerCase().trim().replace(/[.,!?—]/g, '');
     if (!normalized) return null;
 
     return allWords.find(w => {
-      const dictGerman = w.german.toLowerCase();
-      const dictMain = dictGerman.split(' ').pop() || ''; // Extract "Leben" from "das Leben"
+      // Clean up dictionary word (remove plural markers like ", -en")
+      const dictGermanFull = w.german.toLowerCase().split(',')[0].trim();
+      const dictMainPart = dictGermanFull.split(' ').pop() || ''; // e.g., "Leben" from "das Leben"
 
-      // 1. Exact matches (with or without article)
-      if (normalized === dictGerman || normalized === dictMain) return true;
+      // 1. Exact matches (e.g., "das Leben" == "das leben" or "Leben" == "leben")
+      if (normalized === dictGermanFull || normalized === dictMainPart) return true;
 
       // 2. Stem matching (for verbs like "denkt" -> "denken")
-      // Very simple rule: if word starts with the stem (dict word minus 'en' or 'n')
-      const stem = dictMain.length > 3 ? dictMain.replace(/(en|n)$/, '') : dictMain;
+      const stem = dictMainPart.length > 3 ? dictMainPart.replace(/(en|n)$/, '') : dictMainPart;
       if (normalized.startsWith(stem) && stem.length > 2) return true;
 
       // 3. Irregular forms used in texts
       const irregulars: Record<string, string[]> = {
         'lesen': ['liest'],
         'wollen': ['will'],
-        'werden': ['werde', 'wird'],
+        'werden': ['werде', 'wird'],
       };
-      if (irregulars[dictMain]?.includes(normalized)) return true;
+      if (irregulars[dictMainPart]?.includes(normalized)) return true;
 
       return false;
     });
   };
 
   const renderText = () => {
-    let elements: React.ReactNode[] = [];
-    // Split by spaces and punctuation, but keep punctuation as separate tokens
+    const elements: React.ReactNode[] = [];
+    // Split by punctuation and spaces, keeping them as separate tokens
     const tokens = text.split(/(\s+|,|\.|\!|\?|—)/);
+    
+    // Tracking pointer to skip tokens that were part of a multi-token match
+    let skipUntil = -1;
 
-    tokens.forEach((token, index) => {
-      const matchingWord = findMatchingWord(token);
+    for (let i = 0; i < tokens.length; i++) {
+      if (i <= skipUntil) continue;
       
-      // Highlight if it's from current lesson OR already learned
-      const isFromCurrentLesson = matchingWord && currentLessonWords.some(cw => cw.id === matchingWord.id);
-      const isLearned = matchingWord && learnedWordIds.has(matchingWord.id);
+      const token = tokens[i];
+      if (token.match(/^\s+$/) || token.match(/^[.,!?—]$/)) {
+        elements.push(token);
+        continue;
+      }
 
-      if (matchingWord && (isFromCurrentLesson || isLearned)) {
+      let match: Word | null = null;
+      let matchText = '';
+
+      // 1. Пытаемся найти фразу с артиклем (например, "das" + " " + "Leben")
+      // Проверяем текущий токен, следующий (пробел) и токен после него
+      if (i + 2 < tokens.length && tokens[i+1].match(/^\s+$/)) {
+        const potentialPhrase = tokens[i] + tokens[i+1] + tokens[i+2];
+        const m = findMatchingWord(potentialPhrase);
+        
+        // Если нашли совпадение в словаре и оно либо из этого урока, либо уже выучено
+        if (m && (currentLessonWords.some(cw => cw.id === m.id) || learnedWordIds.has(m.id))) {
+          // Проверяем, что в самом словаре это слово записано с артиклем (содержит пробел)
+          const dictEntry = m.german.toLowerCase().split(',')[0].trim();
+          if (dictEntry.includes(' ')) {
+            match = m;
+            matchText = potentialPhrase;
+            skipUntil = i + 2;
+          }
+        }
+      }
+
+      // 2. Если фраза не найдена, ищем одиночное слово
+      if (!match) {
+        const m = findMatchingWord(token);
+        if (m && (currentLessonWords.some(cw => cw.id === m.id) || learnedWordIds.has(m.id))) {
+          match = m;
+          matchText = token;
+        }
+      }
+
+      if (match) {
+        const isLearned = learnedWordIds.has(match.id);
         elements.push(
           <span 
-            key={index} 
-            onClick={() => setSelectedWord(matchingWord)}
+            key={i} 
+            onClick={() => setSelectedWord(match)}
             className={`inline-block px-1 rounded cursor-pointer transition-colors font-bold ${
-              selectedWord?.id === matchingWord.id 
+              selectedWord?.id === match.id 
               ? 'bg-indigo-600 text-white' 
               : isLearned 
                 ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' 
                 : 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'
             }`}
           >
-            {token}
+            {matchText}
           </span>
         );
       } else {
         elements.push(token);
       }
-    });
+    }
 
     return elements;
   };
