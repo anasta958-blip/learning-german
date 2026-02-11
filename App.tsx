@@ -22,6 +22,8 @@ const App: React.FC = () => {
     };
   });
 
+  const allWords = useMemo(() => INITIAL_LESSONS.flatMap(l => l.words), []);
+
   useEffect(() => {
     const dataToSave = {
       ...state,
@@ -158,7 +160,7 @@ const App: React.FC = () => {
 
   const renderDictionary = () => {
     const learnedWords = Array.from(state.learnedWordIds)
-      .map(id => INITIAL_LESSONS.flatMap(l => l.words).find(w => w.id === id))
+      .map(id => allWords.find(w => w.id === id))
       .filter((w): w is Word => !!w);
 
     return (
@@ -240,7 +242,9 @@ const App: React.FC = () => {
             {lesson && (
               <ReadingView 
                 text={lesson.text} 
-                words={lesson.words} 
+                allWords={allWords}
+                currentLessonWords={lesson.words}
+                learnedWordIds={state.learnedWordIds}
                 onComplete={goToReinforce} 
               />
             )}
